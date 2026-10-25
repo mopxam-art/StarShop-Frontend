@@ -23,9 +23,6 @@ import { CalendarWeekView } from './components/CalendarWeekView';
 import { EventDetailsModal } from './components/EventDetailsModal';
 import { Calendar as CalendarIcon, X } from 'lucide-react';
 
-// Deterministic reference date for SSR and initial render consistency
-const DETERMINISTIC_FALLBACK_DATE = new Date(2024, 2, 15);
-
 interface BuyerCalendarProps {
   initialEvents?: CalendarEvent[];
   initialDate?: Date;
@@ -35,28 +32,42 @@ export function BuyerCalendar({
   initialEvents,
   initialDate,
 }: BuyerCalendarProps) {
-  // Deterministic state on initial render to prevent SSR hydration mismatch
-  const [currentDate, setCurrentDate] = useState<Date>(
-    () => initialDate || DETERMINISTIC_FALLBACK_DATE
+  // Nullable initial date to prevent SSR flash of arbitrary reference date
+  const [currentDate, setCurrentDate] = useState<Date | null>(
+    () => initialDate || null
   );
   const [dynamicEvents, setDynamicEvents] = useState<CalendarEvent[] | null>(
     null
   );
 
-  // Hydrate user date and dynamic relative events after mount
+  // Hydrate client date on mount when initialDate is omitted
   useEffect(() => {
     if (!initialDate) {
       setCurrentDate(new Date());
     }
+  }, []);
+
+  // Sync currentDate if initialDate prop changes
+  useEffect(() => {
+    if (initialDate) {
+      setCurrentDate(initialDate);
+    }
+  }, [initialDate]);
+
+  // Generate dynamic relative events if initialEvents is omitted,
+  // reconciling with DEFAULT_MOCK_EVENTS to eliminate duplicate orderId/type events
+  useEffect(() => {
     if (!initialEvents) {
       const dynamic = generateMockEvents(new Date());
-      const map = new Map<string, CalendarEvent>();
-      for (const ev of [...dynamic, ...DEFAULT_MOCK_EVENTS]) {
-        map.set(ev.id, ev);
-      }
-      setDynamicEvents(Array.from(map.values()));
+      const dynamicKeys = new Set(
+        dynamic.map(ev => `${ev.orderId}:${ev.type}`)
+      );
+      const nonOverlappingDefaults = DEFAULT_MOCK_EVENTS.filter(
+        ev => !dynamicKeys.has(`${ev.orderId}:${ev.type}`)
+      );
+      setDynamicEvents([...dynamic, ...nonOverlappingDefaults]);
     }
-  }, [initialDate, initialEvents]);
+  }, [initialEvents]);
 
   // Base events combining relative dynamic generator and static orders
   const baseEvents = useMemo(() => {
@@ -88,6 +99,7 @@ export function BuyerCalendar({
 
   // Month navigation handlers
   const handlePrev = () => {
+    if (!currentDate) return;
     if (viewMode === 'month') {
       setCurrentDate(
         new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1)
@@ -104,6 +116,7 @@ export function BuyerCalendar({
   };
 
   const handleNext = () => {
+    if (!currentDate) return;
     if (viewMode === 'month') {
       setCurrentDate(
         new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1)
@@ -143,6 +156,7 @@ export function BuyerCalendar({
 
   // Compute matrix of days based on active view mode and live filter state
   const days: CalendarDay[] = useMemo(() => {
+    if (!currentDate) return [];
     if (viewMode === 'month') {
       return getMonthMatrix(
         currentDate.getFullYear(),
@@ -164,6 +178,26 @@ export function BuyerCalendar({
     if (!selectedDateString) return null;
     return days.find(d => d.dateString === selectedDateString) || null;
   }, [days, selectedDateString]);
+
+  // Loading skeleton when currentDate has not yet hydrated
+  if (!currentDate) {
+    return (
+      <div
+        data-testid="calendar-skeleton"
+        className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 animate-pulse"
+      >
+        <div className="h-14 bg-white/5 rounded-2xl" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="h-24 bg-white/5 rounded-2xl" />
+          <div className="h-24 bg-white/5 rounded-2xl" />
+          <div className="h-24 bg-white/5 rounded-2xl" />
+          <div className="h-24 bg-white/5 rounded-2xl" />
+        </div>
+        <div className="h-14 bg-white/5 rounded-xl" />
+        <div className="h-96 bg-white/5 rounded-2xl" />
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">

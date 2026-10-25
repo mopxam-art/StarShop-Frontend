@@ -112,7 +112,7 @@ export function EventDetailsModal({
     >
       <div
         ref={modalRef}
-        className="bg-[#12111A] border border-white/20 rounded-2xl max-w-lg w-full p-6 text-white shadow-2xl relative overflow-hidden"
+        className="bg-[#12111A] border border-white/20 rounded-2xl max-w-lg w-full max-h-[calc(100dvh-2rem)] overflow-y-auto overflow-x-hidden p-6 text-white shadow-2xl relative"
       >
         {/* Top glow accent */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 via-indigo-500 to-pink-500" />

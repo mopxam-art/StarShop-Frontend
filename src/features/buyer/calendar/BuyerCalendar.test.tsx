@@ -16,7 +16,7 @@ import {
   filterCalendarEvents,
   calculateCalendarStats,
 } from './utils/calendarUtils';
-import { generateMockEvents } from './constants/mockData';
+import { generateMockEvents, DEFAULT_MOCK_EVENTS } from './constants/mockData';
 import { BuyerCalendar } from './BuyerCalendar';
 import { CalendarEvent } from './types';
 
@@ -259,6 +259,28 @@ describe('Buyer Activity Calendar - Unit & Integration Tests', () => {
         assert.ok(ev.product);
         assert.ok(ev.date);
         assert.ok(ev.status);
+      }
+    });
+
+    it('deduplicates mock events by orderId and type against DEFAULT_MOCK_EVENTS', () => {
+      const dynamic = generateMockEvents(new Date());
+      const dynamicKeys = new Set(
+        dynamic.map(ev => `${ev.orderId}:${ev.type}`)
+      );
+      const nonOverlappingDefaults = DEFAULT_MOCK_EVENTS.filter(
+        ev => !dynamicKeys.has(`${ev.orderId}:${ev.type}`)
+      );
+      const combined = [...dynamic, ...nonOverlappingDefaults];
+
+      const seenKeys = new Set<string>();
+      for (const ev of combined) {
+        const key = `${ev.orderId}:${ev.type}`;
+        assert.strictEqual(
+          seenKeys.has(key),
+          false,
+          `Duplicate event orderId:type detected: ${key}`
+        );
+        seenKeys.add(key);
       }
     });
   });
@@ -538,6 +560,32 @@ describe('Buyer Activity Calendar - Unit & Integration Tests', () => {
         null
       );
       assert.strictEqual(document.activeElement, triggerBtn);
+    });
+
+    it('preserves user navigated month when initialEvents prop updates', () => {
+      const fixedDate = new Date(2026, 9, 24); // October 2026
+      const { rerender } = render(
+        <BuyerCalendar initialDate={fixedDate} initialEvents={sampleEvents} />
+      );
+
+      // Verify header shows October 2026
+      assert.ok(screen.getByText('October 2026'));
+
+      // Navigate to November 2026
+      const nextBtn = screen.getByLabelText('Next Month');
+      fireEvent.click(nextBtn);
+      assert.ok(screen.getByText('November 2026'));
+
+      // Rerender with updated initialEvents prop
+      rerender(
+        <BuyerCalendar
+          initialDate={fixedDate}
+          initialEvents={[...sampleEvents]}
+        />
+      );
+
+      // User's navigated month (November 2026) must NOT be reset to October
+      assert.ok(screen.getByText('November 2026'));
     });
   });
 });
