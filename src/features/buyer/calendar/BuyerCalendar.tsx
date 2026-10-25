@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   CalendarEvent,
   CalendarDay,
@@ -23,6 +23,9 @@ import { CalendarWeekView } from './components/CalendarWeekView';
 import { EventDetailsModal } from './components/EventDetailsModal';
 import { Calendar as CalendarIcon, X } from 'lucide-react';
 
+// Deterministic reference date for SSR and initial render consistency
+const DETERMINISTIC_FALLBACK_DATE = new Date(2024, 2, 15);
+
 interface BuyerCalendarProps {
   initialEvents?: CalendarEvent[];
   initialDate?: Date;
@@ -32,25 +35,42 @@ export function BuyerCalendar({
   initialEvents,
   initialDate,
 }: BuyerCalendarProps) {
+  // Deterministic state on initial render to prevent SSR hydration mismatch
+  const [currentDate, setCurrentDate] = useState<Date>(
+    () => initialDate || DETERMINISTIC_FALLBACK_DATE
+  );
+  const [dynamicEvents, setDynamicEvents] = useState<CalendarEvent[] | null>(
+    null
+  );
+
+  // Hydrate user date and dynamic relative events after mount
+  useEffect(() => {
+    if (!initialDate) {
+      setCurrentDate(new Date());
+    }
+    if (!initialEvents) {
+      const dynamic = generateMockEvents(new Date());
+      const map = new Map<string, CalendarEvent>();
+      for (const ev of [...dynamic, ...DEFAULT_MOCK_EVENTS]) {
+        map.set(ev.id, ev);
+      }
+      setDynamicEvents(Array.from(map.values()));
+    }
+  }, [initialDate, initialEvents]);
+
   // Base events combining relative dynamic generator and static orders
   const baseEvents = useMemo(() => {
     if (initialEvents) return initialEvents;
-    const dynamic = generateMockEvents();
-    // deduplicate by id
-    const map = new Map<string, CalendarEvent>();
-    for (const ev of [...dynamic, ...DEFAULT_MOCK_EVENTS]) {
-      map.set(ev.id, ev);
-    }
-    return Array.from(map.values());
-  }, [initialEvents]);
+    if (dynamicEvents) return dynamicEvents;
+    return DEFAULT_MOCK_EVENTS;
+  }, [initialEvents, dynamicEvents]);
 
-  const [currentDate, setCurrentDate] = useState<Date>(
-    () => initialDate || new Date()
-  );
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [statusFilter, setStatusFilter] = useState<CalendarFilterStatus>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedDay, setSelectedDay] = useState<CalendarDay | null>(null);
+  const [selectedDateString, setSelectedDateString] = useState<string | null>(
+    null
+  );
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(
     null
   );
@@ -102,37 +122,48 @@ export function BuyerCalendar({
   const handleToday = () => {
     const today = new Date();
     setCurrentDate(today);
-    setSelectedDay(null);
+    setSelectedDateString(null);
   };
 
-  const handleSelectEvent = (event: CalendarEvent) => {
+  const handleSelectEvent = useCallback((event: CalendarEvent) => {
     setSelectedEvent(event);
     setIsModalOpen(true);
-  };
+  }, []);
 
-  const handleCloseModal = () => {
+  const handleCloseModal = useCallback(() => {
     setIsModalOpen(false);
     setSelectedEvent(null);
-  };
+  }, []);
 
-  const handleSelectDay = (day: CalendarDay) => {
-    setSelectedDay(prev => (prev?.dateString === day.dateString ? null : day));
-  };
+  const handleSelectDay = useCallback((day: CalendarDay) => {
+    setSelectedDateString(prev =>
+      prev === day.dateString ? null : day.dateString
+    );
+  }, []);
 
-  // Compute matrix of days based on active view mode
+  // Compute matrix of days based on active view mode and live filter state
   const days: CalendarDay[] = useMemo(() => {
-    const selectedDateStr = selectedDay?.dateString;
     if (viewMode === 'month') {
       return getMonthMatrix(
         currentDate.getFullYear(),
         currentDate.getMonth(),
         filteredEvents,
-        selectedDateStr
+        selectedDateString || undefined
       );
     } else {
-      return getWeekDays(currentDate, filteredEvents, selectedDateStr);
+      return getWeekDays(
+        currentDate,
+        filteredEvents,
+        selectedDateString || undefined
+      );
     }
-  }, [currentDate, viewMode, filteredEvents, selectedDay]);
+  }, [currentDate, viewMode, filteredEvents, selectedDateString]);
+
+  // Derive active selected day from days to reflect live filter counts and allow event selection
+  const activeSelectedDay = useMemo(() => {
+    if (!selectedDateString) return null;
+    return days.find(d => d.dateString === selectedDateString) || null;
+  }, [days, selectedDateString]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
@@ -158,25 +189,42 @@ export function BuyerCalendar({
       />
 
       {/* Selected Day Banner if active */}
-      {selectedDay && (
-        <div className="flex items-center justify-between bg-purple-950/30 border border-purple-500/30 rounded-xl px-4 py-3 text-sm">
-          <div className="flex items-center gap-2">
-            <CalendarIcon className="w-4 h-4 text-purple-400" />
-            <span className="text-white font-medium">
-              Selected Day: {formatDisplayDate(selectedDay.dateString)}
-            </span>
-            <span className="text-gray-400">
-              ({selectedDay.events.length} event(s))
-            </span>
+      {activeSelectedDay && (
+        <div className="bg-purple-950/30 border border-purple-500/30 rounded-xl p-4 text-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="w-4 h-4 text-purple-400" />
+              <span className="text-white font-medium">
+                Selected Day: {formatDisplayDate(activeSelectedDay.dateString)}
+              </span>
+              <span className="text-gray-400">
+                ({activeSelectedDay.events.length} event(s))
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedDateString(null)}
+              className="flex items-center gap-1 text-xs text-purple-300 hover:text-white"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Clear selection</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setSelectedDay(null)}
-            className="flex items-center gap-1 text-xs text-purple-300 hover:text-white"
-          >
-            <X className="w-3.5 h-3.5" />
-            <span>Clear selection</span>
-          </button>
+          {activeSelectedDay.events.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-1 border-t border-purple-500/20">
+              {activeSelectedDay.events.map(event => (
+                <button
+                  key={event.id}
+                  type="button"
+                  onClick={() => handleSelectEvent(event)}
+                  className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all hover:scale-105 ${event.statusColor} ${event.textColor}`}
+                >
+                  <span className="font-semibold">{event.orderId}</span> -{' '}
+                  {event.product}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

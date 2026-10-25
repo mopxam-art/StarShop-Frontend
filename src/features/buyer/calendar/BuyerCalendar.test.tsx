@@ -1,21 +1,8 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import './test-dom-setup';
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-
-// Setup JSDOM environment for DOM & React Testing Library
-const { JSDOM } = require('jsdom');
-const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-  url: 'http://localhost:3000',
-});
-(global as any).window = dom.window;
-(global as any).document = dom.window.document;
-(global as any).HTMLElement = dom.window.HTMLElement;
-(global as any).Node = dom.window.Node;
-(global as any).requestAnimationFrame = (callback: any) =>
-  setTimeout(callback, 0);
-(global as any).cancelAnimationFrame = (id: any) => clearTimeout(id);
-
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import {
   formatDate,
@@ -474,6 +461,83 @@ describe('Buyer Activity Calendar - Unit & Integration Tests', () => {
         screen.queryByRole('heading', { name: 'ORD-102' }),
         null
       );
+    });
+
+    it('renders BuyerCalendar cleanly without props (SSR hydration safe)', () => {
+      render(<BuyerCalendar />);
+      assert.ok(screen.getByText('Buyer Activity Calendar'));
+      assert.ok(screen.getByRole('button', { name: 'Month' }));
+    });
+
+    it('allows opening modal by clicking an event pill inside the selected day banner', () => {
+      const fixedDate = new Date(2026, 9, 24);
+      render(
+        <BuyerCalendar initialDate={fixedDate} initialEvents={sampleEvents} />
+      );
+
+      // Click on day number 15 (which has ORD-101)
+      const day15Number = screen.getAllByText('15')[0];
+      fireEvent.click(day15Number.closest('div[class*="min-h"]')!);
+
+      // Banner is visible
+      assert.ok(screen.getByText(/Selected Day:/i));
+
+      // Click the banner event pill
+      const bannerPill = screen.getByRole('button', {
+        name: /ORD-101 - Stellar Cyber Hoodie/i,
+      });
+      fireEvent.click(bannerPill);
+
+      // Modal opens
+      assert.ok(screen.getByRole('heading', { name: 'ORD-101' }));
+    });
+
+    it('updates selected day event count dynamically when status filter changes', () => {
+      const fixedDate = new Date(2026, 9, 24);
+      render(
+        <BuyerCalendar initialDate={fixedDate} initialEvents={sampleEvents} />
+      );
+
+      // Click on day 15 (which has 1 event: ORD-101 with status 'Pending')
+      const day15Number = screen.getAllByText('15')[0];
+      fireEvent.click(day15Number.closest('div[class*="min-h"]')!);
+
+      // Initially shows (1 event(s))
+      assert.ok(screen.getByText('(1 event(s))'));
+
+      // Filter by 'Delivered' (ORD-101 is 'Pending')
+      const deliveredFilterBtn = screen.getByRole('button', {
+        name: /Delivered/i,
+      });
+      fireEvent.click(deliveredFilterBtn);
+
+      // Count in banner updates to (0 event(s))
+      assert.ok(screen.getByText('(0 event(s))'));
+    });
+
+    it('manages focus and cycles focus inside EventDetailsModal', () => {
+      const fixedDate = new Date(2026, 9, 24);
+      render(
+        <BuyerCalendar initialDate={fixedDate} initialEvents={sampleEvents} />
+      );
+
+      const triggerBtn = screen.getAllByText(/ORD-101/i)[0].closest('button')!;
+      triggerBtn.focus();
+      assert.strictEqual(document.activeElement, triggerBtn);
+
+      fireEvent.click(triggerBtn);
+
+      // Modal opens and focus shifts to close button
+      const closeBtn = screen.getByLabelText('Close details');
+      assert.strictEqual(document.activeElement, closeBtn);
+
+      // Escape closes modal and restores focus
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      assert.strictEqual(
+        screen.queryByRole('heading', { name: 'ORD-101' }),
+        null
+      );
+      assert.strictEqual(document.activeElement, triggerBtn);
     });
   });
 });
